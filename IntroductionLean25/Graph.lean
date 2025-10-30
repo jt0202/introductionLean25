@@ -131,7 +131,7 @@ theorem length_walk_le_length_vertices_of_nodup {G : Graph α} {l : List α} (h 
   unfold isWalk at h
   apply h.1
 
-noncomputable def exploreGraph (G : Graph α) (l : List α) (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []): Sum α (α ×List α) :=
+def exploreGraph (G : Graph α) (l : List α) (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []): Sum α (α ×List α) :=
   let currVertex := l.head h'
   match h₄: findNeighbor? G currVertex with
   | some x =>
