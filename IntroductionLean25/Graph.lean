@@ -211,42 +211,58 @@ def isCycle (l : List α) (G : Graph α) : Prop :=
 -/
 def isAcyclic (G : Graph α) : Prop := ∀ (l : List α), ¬ isCycle l G
 
+/-
+  Eine Liste l ist eine Teilmenge einer Liste l', wenn jedes Element aus l auch in l'
+  ist. Die Reihenfolge ist dabei aber egal. Enthält l keine Duplikate, dann ist
+  die Länge von l' kleiner gleich der Länge von l. Dieses Theorem benötigen wir für den Beweis der Terminierung.
+-/
 theorem length_le_length_of_subset_of_nodup {l l' : List α} (h : l ⊆ l') (h' : List.Nodup l) : l.length ≤ l'.length := by
+  -- Wir beweisen die Aussage mittels Induktion über l für beliebige l'. Dafür
+  -- benutzen wir generalizing um dies nicht für ein festes l' zu zeigen, was nicht
+  -- gehen würde.
   induction l generalizing l' with
   | nil => simp
   | cons hd tl ih =>
+    -- Aufspaltung der Hypothesen in Kopf und Körper der Liste
     simp
     simp at h
     simp at h'
-    specialize @ih (l'.erase hd)
+    -- Wir zeigen, dass tl ⊆ l'.erase hd ist, da dies für die Nutzung der Induktions
+    -- hypothese benötigt wird.
     have : tl ⊆ l'.erase hd := by
       intro a mem
       have : a ≠ hd := by
         intro ahd
         rw [ahd] at mem
+        -- Wenn a = hd ist und a ∈ tl, dann ist l nicht duplikatfrei.
         exact absurd mem h'.1
       rw [List.mem_erase_of_ne this]
       apply h.2 mem
     specialize ih this h'.2
+    -- tl.length ≤ (l'.erase hd).length -1
     rw [List.length_erase, if_pos h.1] at ih
+    -- Nutze Transitivität
     apply Nat.le_trans (m := (l'.length - 1) + 1)
     · simp [ih]
     · grind
 
+/-
+  Nutzung des vorherigen Theorems für Graphen, da jeder Walk eine Teilmenge der Knotenliste ist.
+-/
 theorem length_walk_le_length_vertices_of_nodup {G : Graph α} {l : List α} (h : isWalk l G) (h₂ : List.Nodup l) :
     l.length ≤ G.vertices.length := by
   apply length_le_length_of_subset_of_nodup ?_ h₂
   unfold isWalk at h
   apply h.1
 
-def exploreGraph (G : Graph α) (l : List α) (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []): Sum α (α ×List α) :=
+def exploreGraph (G : Graph α) (l : List α) (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []): List α  :=
   let currVertex := l.head h'
   match h₄: findNeighbor? G currVertex with
   | some x =>
     if h₃ : x ∈ l
-    then Sum.inr ⟨x,l⟩
+    then x::l
     else exploreGraph G (x::l) (isWalk_of_cons_findNeighbor_isWalk h' h (by simp [currVertex] at h₄; exact h₄)) (by simp[h₃, h₂]) (by simp)
-  | none => Sum.inl currVertex
+  | none => l
 termination_by G.vertices.length - l.length
 decreasing_by
   have h₁ : (x::l).length ≤ G.vertices.length :=  by
@@ -259,105 +275,102 @@ decreasing_by
   have h₂ : l.length < G.vertices.length := by grind
   exact Nat.sub_succ_lt_self G.vertices.length l.length h₂
 
-theorem isSink_of_exploreGraph_eq_node {G : Graph α} {x : α} {l : List α} (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []) :
-    exploreGraph G l h h₂ h' = Sum.inl x → isSink x G := by
-  rw [isSink_iff_findNeighbor?_eq_none]
+theorem exploreGraph_semantics  {G : Graph α} {l l': List α} (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []) (h₃ : exploreGraph G l h h₂ h' = l') :
+    ∃ (hl : l' ≠ []), isWalk l' G ∧ (isSink (l'.head hl) G ∨ (l'.head hl ∈ l'.tail)) := by
+  -- Nutze simp statt rw, da simp unter dem Quantor umschreiben kann.
+  simp [isSink_iff_findNeighbor?_eq_none]
   induction hl: G.vertices.length - l.length generalizing l with
   | zero =>
-    rw [Nat.sub_eq_zero_iff_le] at hl
-    have := length_walk_le_length_vertices_of_nodup h h₂
-    unfold exploreGraph
-    simp
-    split
-    · rename_i y hy
-      split
-      · simp
-      · rename_i hy'
-        have walky := isWalk_of_cons_findNeighbor_isWalk _ h hy
-        have walky_nodup : List.Nodup (y::l) := by grind
-        have walky_length : (y::l).length ≤ G.vertices.length := by
-          apply length_walk_le_length_vertices_of_nodup walky walky_nodup
-        grind
-    · intro hx
-      have : x = l.head h' := by grind
-      rw [this]
-      constructor
-      · apply head_of_walk_is_mem h' h
-      · assumption
-  | succ m ih =>
-    unfold exploreGraph
-    simp
-    split
-    · rename_i y hy
-      split
-      · simp
-      · apply ih
-        simp
-        grind
-    · intro hx
-      have : x = l.head h' := by grind
-      rw [this]
-      constructor
-      · apply head_of_walk_is_mem h' h
-      · assumption
-
-theorem exploreGraph_pair {G : Graph α} {x : α} {l l': List α} (h : isWalk l G) (h₂ : List.Nodup l) (h' : l ≠ []) :
-    exploreGraph G l h h₂ h' = .inr (x, l') → l' ≠ [] ∧ isWalk (x :: l') G ∧ x ∈ l' := by
-  induction hl: G.vertices.length - l.length generalizing l with
-  | zero =>
-    rw [Nat.sub_eq_zero_iff_le] at hl
-    have := length_walk_le_length_vertices_of_nodup h h₂
-    unfold exploreGraph
-    simp
-    split
-    · rename_i y hy
-      split
-      · rename_i mem
-        intro h₄
-        injections
-        rename_i h₅ h₆
-        rw [← h₅, ← h₆]
+    unfold exploreGraph at h₃
+    simp at h₃
+    split at h₃
+    · -- x ist Nachbar des Kopfes
+      rename_i x hx
+      split at h₃
+      · -- x in l
+        rename_i hx'
+        simp [← h₃]
         constructor
-        · apply h'
-        · constructor
-          · apply isWalk_of_cons_findNeighbor_isWalk h' h hy
-          · apply mem
-      · rename_i hy'
-        have walky := isWalk_of_cons_findNeighbor_isWalk _ h hy
-        have walky_nodup : List.Nodup (y::l) := by grind
-        have walky_length : (y::l).length ≤ G.vertices.length := by
+        · apply isWalk_of_cons_findNeighbor_isWalk h' h hx
+        · -- rechter Fall
+          right
+          apply hx'
+      · -- Dieser Fall kann nicht eintreten. Unser Walk ist bereits so lang, wie der
+        -- Graph und enthält keine Duplikate. Wir zeigen, dass dies nicht möglich ist.
+        rename_i hx'
+        -- Fügen wir x an l an, ist es immer noch ein walk
+        have walky := isWalk_of_cons_findNeighbor_isWalk _ h hx
+        -- da x nicht in l, ist (x::l) duplikatfrei
+        have walky_nodup : List.Nodup (x::l) := by grind
+        -- (x::l).length = 1 + l.length ≤ G.vertices.length da duplikatfreier Walk
+        have walky_length : (x::l).length ≤ G.vertices.length := by
           apply length_walk_le_length_vertices_of_nodup walky walky_nodup
+        -- Nutze grind um Widerspruch zu erzeugen.
         grind
-    · simp
-  | succ m ih =>
-    unfold exploreGraph
-    simp
-    split
-    · rename_i y hy
-      split
-      · rename_i mem
-        intro h₄
-        injections
-        rename_i h₅ h₆
-        rw [← h₅, ← h₆]
+    · rename_i h₄
+      simp [← h₃]
+      constructor
+      · apply h
+      · -- da l=l' können wir den Beweis, dass l ≠ [] verwenden für den Existenzquantor
+        exists h'
+        -- Fall Senke
+        left
         constructor
-        · apply h'
-        · constructor
-          · apply isWalk_of_cons_findNeighbor_isWalk h' h hy
-          · apply mem
-      · apply ih
-        simp
-        grind
-    · simp
+        · -- Zeige, dass der Kopf von l ein Knoten ist, da l ein Walk ist.
+          apply h.1
+          simp
+        · -- Kopf ist Senke
+          apply h₄
+  | succ m ih =>
+    -- Der Induktionsschritt funktioniert größtenteils genauso
+    unfold exploreGraph at h₃
+    simp at h₃
+    split at h₃
+    · rename_i x hx
+      split at h₃
+      · rename_i hx'
+        simp [← h₃]
+        constructor
+        · apply isWalk_of_cons_findNeighbor_isWalk h' h hx
+        · right
+          apply hx'
+      · rename_i hx'
+        -- Induktionsschritt da rekursiver Fall. Wir bereitn diesen vor indem wir
+        -- zeigen, dass immer noch ein Walk entsteht.
+        have ih₁: isWalk (x::l) G := by
+          apply isWalk_of_cons_findNeighbor_isWalk h' h hx
+        -- die restlichen Fälle können per grind übernommen werden.
+        apply ih ih₁ (by grind) (by simp) h₃ (by grind)
+    · simp [← h₃]
+      constructor
+      · apply h
+      · exists h'
+        left
+        constructor
+        · apply h.1
+          simp
+        · assumption
 
+/-
+  takeUntil nimmt ein Element, eine Liste und einen Beweis, dass das Element in der Liste ist
+  und behält die Elemente der Liste bis zum Element.
+-/
 def takeUntil (x : α) (l : List α) (hx : x ∈ l) : List α :=
   match l with
-  | .nil => by simp at hx
+  | .nil =>
+    -- Da x in l ist per Annahme und l=[], kann dieser Fall nicht auftreten.
+    -- Zur Vollständigkeit muss er dennoch aufgeführt werden. Mittels simp
+    -- zeigen wir, dass false entsteht und können dies als Wert benutzen, da
+    -- aus false beliebiges folgt.
+    by simp at hx
   | .cons hd tl =>
     if h: x = hd
     then [hd]
     else hd::(takeUntil x tl (by grind))
 
+/-
+  Die enstehende Liste ist nicht leer. Beweis per Fallunterscheidung.
+-/
 theorem takeUntil_not_empty {x : α} {l : List α} (hx : x ∈ l) : takeUntil x l hx ≠ [] := by
   cases l with
   | nil => simp at hx
@@ -367,6 +380,9 @@ theorem takeUntil_not_empty {x : α} {l : List α} (hx : x ∈ l) : takeUntil x 
     · simp
     · simp
 
+/-
+  Der Kopf der neuen Liste ist im jeden Fall der selbe.
+-/
 theorem takeUntil_head_eq_head {x : α} {l : List α} (hx : x ∈ l) :
     l.head (by grind) = (takeUntil x l hx).head (takeUntil_not_empty hx) := by
   cases l with
@@ -377,6 +393,9 @@ theorem takeUntil_head_eq_head {x : α} {l : List α} (hx : x ∈ l) :
     · simp
     · simp
 
+/-
+  Die Liste endet mit dem gesuchten Element. Beweis per Induktion.
+-/
 theorem getLast_takeUntil {x : α} {l : List α} (hx : x ∈ l) :
     (takeUntil x l hx).getLast (takeUntil_not_empty hx) = x := by
   induction l with
@@ -389,6 +408,9 @@ theorem getLast_takeUntil {x : α} {l : List α} (hx : x ∈ l) :
       simp [h,List.getLast_cons (takeUntil_not_empty hx)]
       apply ih
 
+/-
+  Da das gesuchte Element in der Liste auftaucht, hat es mindestens Länge 1.
+-/
 theorem one_le_length_takeUntil {x : α} {l : List α} (hx : x ∈ l) :
     1 ≤ (takeUntil x l hx).length := by
   cases l with
@@ -399,19 +421,22 @@ theorem one_le_length_takeUntil {x : α} {l : List α} (hx : x ∈ l) :
     · simp
     · simp
 
+/-
+  Diese Operation erhält die Walkeigenschaft. Beweis mit vorherigen Lemmas und simp.
+-/
 theorem isWalk_takeUntil_of_isWalk  {x : α} {G : Graph α} {l : List α} (hx : x ∈ l) (h : isWalk l G) :
     isWalk (takeUntil x l hx) G := by
   induction l with
   | nil => simp at hx
   | cons hd tl ih =>
     simp [takeUntil]
+    -- Fallunterscheidung ob x = hd ist.
     by_cases h' : x = hd
     · simp [h']
       apply isWalk_singleton
       apply h.1
       simp
     · simp [h'] at hx
-
       simp [h']
       apply isWalk_of_cons_isNeighbor_isWalk
       · apply ih
@@ -430,38 +455,55 @@ theorem isWalk_takeUntil_of_isWalk  {x : α} {G : Graph α} {l : List α} (hx : 
             simp
           · apply h₁.1
 
+/-
+  Unser Hauptsatz: Jeder Graph mit mindestens einem Knoten hat eine Senke oder einen Kreis.
+-/
 theorem every_graph_has_sink_or_cycle (G : Graph α) (h : ∃ (x : α), x ∈ G.vertices) :
     (∃ (v : α), isSink v G) ∨ ∃ (l : List α), isCycle l G := by
+  -- x ist der Knoten
   rcases h with ⟨x, hx⟩
-  cases h: exploreGraph G [x] (isWalk_singleton hx) (by simp) (by simp) with
-  | inl v =>
+  -- Das Resultat, wenn wir exploreGraph von x starten.
+  let l' := exploreGraph G [x] (isWalk_singleton hx) (by simp) (by simp)
+  have := exploreGraph_semantics (G:= G) (l:= [x])
+    (l' := l') (isWalk_singleton hx) (by simp) (by simp) (by rfl)
+  rcases this with ⟨hl', hwalk, h⟩
+  cases h with
+  | inl h =>
+    -- Fall Senke
     left
-    exists v
-    apply isSink_of_exploreGraph_eq_node (isWalk_singleton hx) (by simp) (by simp) h
-  | inr y =>
-    cases y with
-    | mk v l =>
-      have := exploreGraph_pair (isWalk_singleton hx) (by simp) (by simp) h
-      rcases this with ⟨h₁, h₂, h₃⟩
-      right
-      exists (v :: takeUntil v l h₃)
-      simp [isCycle]
-      constructor
-      · apply isWalk_of_cons_isNeighbor_isWalk (takeUntil_not_empty h₃)
-        · apply isWalk_takeUntil_of_isWalk h₃ (isWalk_of_cons h₂)
-        · rw [← takeUntil_head_eq_head]
-          simp [isNeighbor]
-          simp [isWalk] at h₂
-          constructor
-          · have := h₂.2 0 (by grind)
-            rw [List.head_eq_getElem]
-            apply this
-          · constructor
-            · rw [List.head_eq_getElem]
-              apply h₂.1.2 (l[0]'(by grind)) (by grind)
-            · apply h₂.1.1
-      · constructor
-        · intro _
-          rw [List.getLast_cons (takeUntil_not_empty h₃)]
-          rw [getLast_takeUntil]
-        · apply one_le_length_takeUntil
+    exists l'.head hl'
+  | inr h =>
+    -- Fall Kreis. Nutze takeUntil um Kreis aus Pfad zu erhalten.
+    right
+    exists (l'.head hl') :: (takeUntil (l'.head hl') l'.tail h)
+    -- Definition von isCycle
+    simp [isCycle]
+    constructor
+    · -- Walkeigenschaft
+      apply isWalk_of_cons_isNeighbor_isWalk (takeUntil_not_empty h)
+      · -- l' kann zerlegt werden
+        have : l' = (l'.head hl')::(l'.tail) := by exact Eq.symm (List.cons_head_tail hl')
+        rw [this] at hwalk
+        apply isWalk_takeUntil_of_isWalk h (isWalk_of_cons hwalk)
+      · -- Kopf darf an neuen Pfad angefügt werden
+        rw [← takeUntil_head_eq_head]
+        simp [isNeighbor]
+        simp [isWalk] at hwalk
+        constructor
+        · have := hwalk.2 0 (by grind)
+          simp [List.head_eq_getElem]
+          apply this
+        · constructor
+          · apply hwalk.1
+            simp
+          · apply hwalk.1
+            simp
+    · constructor
+      · -- Anfang und Ende gleich
+        intro _
+        rw [List.getLast_cons (takeUntil_not_empty h)]
+        rw [getLast_takeUntil]
+      · -- Kreis hat mindestens Länge 2
+        -- Durch simp reicht es aus, dass takeUntil mindestens Länge 1 hat,
+        -- da der Rest vorne angefügt wird.
+        apply one_le_length_takeUntil
