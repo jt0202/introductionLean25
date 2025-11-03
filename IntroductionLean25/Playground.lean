@@ -1,3 +1,4 @@
+set_option autoImplicit false
 -- Jedes Element hat einen Typ in Lean
 
 #check 1
@@ -19,6 +20,32 @@
 -- Es ergibt sich eine unendliche Typenhierarchie. Type kann nicht in
 -- Type sein, da es sonst ein Russel-Paradox gibt.
 
+-- Wie definieren wir neue Typen? Mit Inductive
+inductive Color
+| red
+| green
+| blue
+
+#check Color.green
+
+-- Induktive Typen können mittels Patternmatching in Funktionen genutzt werden
+def isRed (c : Color) : Bool :=
+  match c with
+  | .red => true
+  | _ => false
+
+def isGreen (c : Color) : Bool :=
+  match c with
+  | .green => true
+  | _ => false
+
+-- Wir können Funktionen aber auch allgemein mit Verknüpfung und Anwendung anderer Funktionen
+-- definieren
+def isBlue (c : Color) : Bool :=
+  ! isRed c && ! isGreen c
+
+#eval isBlue Color.blue
+
 -- Ein spezieller Typ heißt Prop
 #check True ∨ False
 #check 2 = 5
@@ -38,6 +65,15 @@ theorem test2 : 2 = 5 := by sorry
 #print axioms test2
 -- Bei print axioms sollte maximal funext, Classical.choice und
 -- Quot.sound stehen. Ist dort mehr, dann gibt es unbewiesene Annahmen.
+
+-- Außerdem können wir Typen auch als Struktur definieren mit mehreren Feldern.
+-- Diese Felder können auch Beweise enthalten
+
+structure ColorfulEvenNumber where
+  number : Nat
+  color : Color
+  isEven : number % 2 = 0
+
 
 -- Gleiche Sachen sind gleich. Zeige dies mit der Reflexivität (rfl)
 
@@ -119,7 +155,7 @@ theorem test9 (p q : Prop) (h : p) (h' : q) : p ∧ q := by
   · apply h'
 
 theorem test10 (p q r : Prop) (h : p ∨ q) (h' : p → r) (h₂ : q → r) : r := by
-  -- Teilen wir ein oder auf, gibt es mehrere Fälle
+  -- Teilen wir ein Oder auf, gibt es mehrere Fälle
   cases h with
   | inl h =>
     apply h' h
